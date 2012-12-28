@@ -164,8 +164,14 @@ function dir(){var sys=require('sys');for(var i=0,l=arguments.length;i<l;i++)sys
 							if (search[key] instanceof Object && !(search[key] instanceof Array))
 								search[key][func] = args;
 							// equality cancels all other conditions
-							if (func == 'eq')
+							if (func == 'eq') {
+								// allow simple wildcard querying
+								if(typeof args == "string" && args.indexOf("*")>-1) {
+									var v = args.replace("*",".*");
+									args = {"$regex":v,"$options":"i"};
+								}
 								search[key] = args;
+							}
 						}
 					}
 				// TODO: add support for query expressions as Javascript

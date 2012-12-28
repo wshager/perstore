@@ -19,6 +19,17 @@ var valueToSql = exports.valueToSql = function(value){
             return valueToSql(element);
         }).join(",") + ")";
     }
+return typeof(value) == "string" ? "'" + value.replace(/'/g,"''") + "'" : value + '';
+};
+
+// enable regex with RLIKE
+var valueToSqlRlike = exports.valueToSqlRlike = function(value){
+    if(value instanceof Array){
+        return "(" + value.map(function(element){
+        	element = "^"+element.replace("*",".*")+"$";
+            return valueToSql(element);
+        }).join("|") + ")";
+    }
 	return typeof(value) == "string" ? "'" + value.replace(/'/g,"''") + "'" : value + '';
 }; 
 
@@ -102,34 +113,53 @@ exports.SQLStore = function(config){
 			options = options || {};
 			query = parseQuery(query);
 			var limit, count, offset, postHandler, results = true;
-			var where = "";
+			var where = "", gwhere="";
 			var select = this.selectColumns;
 			var order = [];
 			var params = (options.parameters = options.parameters || []);
-			function convertRql(query){
+			// if conjunction use parentheses
+			function convertRql(query,parens){
 				var conjunction = query.name;
 				query.args.forEach(function(term, index){
 					var column = term.args[0];
 					switch(term.name){
 						case "eq":
+							var valuearray;
+							var rlike = false;
 							if(term.args[1] instanceof Array){
-								if(term.args[1].length == 0){
-									// an empty IN clause is considered invalid SQL
-									if(index > 0){
-										where += " " + conjunction + " ";
-									}
-									where += "0=1";
-								}
-								else{
-									safeSqlName(column);
-									addClause(column + " IN " + valueToSql(term.args[1]));
-								}
-                                break;
+								valuearray = term.args[1];
+							} else {
+								valuearray = [term.args[1]];
 							}
-							// else fall through 
+							// allow simple wildcard querying
+							valuearray.forEach(function(value){
+								if(value instanceof Array){
+									value.forEach(function(vv){
+										if(vv.indexOf("*")>-1) rlike = true;
+									});
+								}else if(typeof(value)=="string"){
+									if(value.indexOf("*")>-1) rlike = true;
+								}
+							});
+							if(valuearray.length == 0){
+								// an empty IN clause is considered invalid SQL
+								if(index > 0){
+									where += " " + conjunction + " ";
+								}
+								where += "0=1";
+							}
+							else{
+								safeSqlName(column);
+								if(rlike) {
+									addClause(column + " RLIKE " + valueToSqlRlike(valuearray),parens);
+								} else {
+									addClause(column + " IN " + valueToSql(valuearray),parens);
+								}
+							}
+							break;
 						case "ne": case "lt": case "le": case "gt": case "ge":
 							safeSqlName(column);
-							addClause(config.table + '.' + column + sqlOperators[term.name] + valueToSql(term.args[1]));
+							addClause(config.table + '.' + column + sqlOperators[term.name] + valueToSql(term.args[1]),parens);
 							break;
 						case "sort":
 							if(term.args.length === 0)
@@ -148,9 +178,9 @@ exports.SQLStore = function(config){
 							});
 							break;
 						case "and": case "or":
-							where += "(";
-							convertRql(term);
-							where += ")";
+							convertRql(term,true);
+							addClause("("+gwhere+")");
+							gwhere = "";
 							break;
 						case "in":
 							print("in() is deprecated");
@@ -163,7 +193,7 @@ exports.SQLStore = function(config){
 							}
 							else{
 								safeSqlName(column);
-								addClause(column + " IN " + valueToSql(term.args[1]));
+								addClause(column + " IN " + valueToSql(term.args[1]),parens);
 							}
 							break;
 						case "select":
@@ -215,11 +245,18 @@ exports.SQLStore = function(config){
 						default:
 							throw new URIError("Invalid query syntax, " + term.name+ " not implemented");
 					}
-					function addClause(sqlClause){
-						if(where){
-							where += " " + conjunction + " ";
+					function addClause(sqlClause,parens){
+						if(parens) {
+							if(gwhere){
+								gwhere += " " + conjunction + " ";
+							}
+							gwhere += sqlClause;
+						} else {
+							if(where){
+								where += " " + conjunction + " ";
+							}
+							where += sqlClause;
 						}
-						where += sqlClause;
 					}
 				});
 			}
