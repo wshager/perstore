@@ -164,8 +164,13 @@ function dir(){var sys=require('sys');for(var i=0,l=arguments.length;i<l;i++)sys
 							if (search[key] instanceof Object && !(search[key] instanceof Array))
 								search[key][func] = args;
 							// equality cancels all other conditions
-							if (func == 'eq')
+							if (func == 'eq') {
+								if(typeof args == "string" && args.indexOf("*")>-1) {
+									var v = args.replace("*",".*");
+									args = {"$regex":v,"$options":"i"};
+								}
 								search[key] = args;
+							}
 						}
 					}
 				// TODO: add support for query expressions as Javascript
@@ -275,7 +280,7 @@ module.exports = function(options){
 							// .insert() returns array, we need the first element
 							obj = obj && obj[0];
 							if (obj) delete obj._id;
-							deferred.resolve(obj.id);
+							deferred.resolve(obj);
 						});
 					} else {
 						deferred.reject(id + " exists, and can't be overwritten");
@@ -285,7 +290,7 @@ module.exports = function(options){
 				collection.update(search, object, {upsert: directives.overwrite}, function(err, obj){
 					if (err) return deferred.reject(err);
 					if (obj) delete obj._id;
-					deferred.resolve(id);
+					deferred.resolve(obj);
 				});
 			}
 			return deferred;
